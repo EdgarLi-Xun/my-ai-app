@@ -1,0 +1,59 @@
+{
+    "pages": [
+        {
+            "path": "pages/index/index",
+            "style": {
+                "navigationBarTitleText": "MyAi",
+                "navigationStyle": "custom"
+            }
+        },
+        {
+            "path": "pages/config-backend/config-backend",
+            "style": {
+                "navigationBarTitleText": "配置后端"
+            }
+        },
+        {
+            "path": "pages/login/login",
+            "style": {
+                "navigationBarTitleText": "登录"
+            }
+        },
+        {
+            "path": "pages/conversations/conversations",
+            "style": {
+                "navigationBarTitleText": "对话"
+            }
+        },
+        {
+            "path": "pages/conversation-detail/conversation-detail",
+            "style": {
+                "navigationBarTitleText": "对话"
+            }
+        },
+        {
+            "path": "pages/keys/keys",
+            "style": {
+                "navigationBarTitleText": "API Key"
+            }
+        },
+        {
+            "path": "pages/settings/settings",
+            "style": {
+                "navigationBarTitleText": "设置"
+            }
+        }
+    ],
+    "globalStyle": {
+        "navigationBarTextStyle": "black",
+        "navigationBarTitleText": "MyAi",
+        "navigationBarBackgroundColor": "#FFFFFF",
+        "backgroundColor": "#F8F8F8"
+    },
+    "easycom": {
+        "autoscan": true,
+        "custom": {
+            "^uni-(.*)": "@dcloudio/uni-ui/lib/uni-$1/uni-$1.vue"
+        }
+    }
+}

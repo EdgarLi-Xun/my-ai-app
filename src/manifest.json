@@ -1,0 +1,53 @@
+{
+    "name": "MyAi",
+    "appid": "",
+    "description": "MyAi 移动 App — 跨端镜像 Web 端 AI 对话体验",
+    "versionName": "0.1.0",
+    "versionCode": "1",
+    "transformPx": false,
+    "app-plus": {
+        "usingComponents": true,
+        "nvueStyleCompiler": "uni-app",
+        "compilerVersion": 3,
+        "splashscreen": {
+            "alwaysShowBeforeRender": true,
+            "waiting": true,
+            "autoclose": true,
+            "delay": 0
+        },
+        "modules": {},
+        "distribute": {
+            "android": {
+                "permissions": [
+                    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.CHANGE_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.CHANGE_WIFI_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>"
+                ]
+            },
+            "ios": {},
+            "sdkConfigs": {}
+        }
+    },
+    "quickapp": {},
+    "mp-weixin": {
+        "appid": "",
+        "setting": {
+            "urlCheck": false
+        },
+        "usingComponents": true
+    },
+    "mp-alipay": { "usingComponents": true },
+    "mp-baidu": { "usingComponents": true },
+    "mp-toutiao": { "usingComponents": true },
+    "mp-harmony": {
+        "package": "cn.edgarli.myai",
+        "minPlatformVersion": 12
+    },
+    "uniStatistics": {
+        "enable": false
+    },
+    "vueVersion": "3"
+}
