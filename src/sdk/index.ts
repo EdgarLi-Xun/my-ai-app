@@ -24,6 +24,35 @@ import {
   type StorageAdapter,
   type UserVo,
 } from '@myai/sdk';
+import { ensureGlobalAbortController, ensureGlobalFetch, ensureGlobalTextDecoder, ensureGlobalTextEncoder } from './fetch-polyfill';
+
+// ============================================================
+// App 端 Web API 兼容垫片 / App-side Web API polyfills
+// ============================================================
+
+// 在任何 HTTP 请求前安装：uni-app x App 没有原生 fetch / AbortController / TextDecoder，
+// 落到 uni.request + 最小 AbortController / TextDecoder shim。
+// Install before any HTTP request: uni-app x App has no native fetch / AbortController / TextDecoder;
+// fall back to uni.request + minimal AbortController / TextDecoder shim.
+// H5 / Node：原生 API 存在 → 三个调用都直接跳过。
+// H5 / Node: native APIs present → all three calls short-circuit.
+ensureGlobalFetch();
+ensureGlobalAbortController();
+ensureGlobalTextDecoder();
+ensureGlobalTextEncoder();
+
+// ============================================================
+// 默认后端 URL / Default backend URL
+// ============================================================
+
+/**
+ * 默认后端 URL：当 storage 中没有持久化的 backendUrl 时，bootSdk() 会用此值兜底。
+ * Default backend URL — used as fallback when storage has no persisted backendUrl.
+ *
+ * 调整方法：直接改这个常量并重新构建。
+ * To change: edit this constant and rebuild.
+ */
+export const DEFAULT_BACKEND_URL = 'http://192.168.2.103:8031';
 
 // ============================================================
 // 存储选择 / Storage selection
@@ -98,7 +127,7 @@ function handleUnauthorized(): void {
  */
 export function bootSdk(): void {
   if (state.initialized) return;
-  const url = storage.getBackendUrl();
+  const url = storage.getBackendUrl() ?? DEFAULT_BACKEND_URL;
   if (url) {
     rebuildSdk(url);
   }

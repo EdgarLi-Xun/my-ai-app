@@ -28,7 +28,7 @@
         {
             "path": "pages/conversation-detail/conversation-detail",
             "style": {
-                "navigationBarTitleText": "对话"
+                "navigationBarTitleText": "新对话"
             }
         },
         {

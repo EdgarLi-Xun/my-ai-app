@@ -9,6 +9,7 @@ import { ref, computed } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import type { ProviderVo, UserApiKeyVo, UserApiKeyDto } from '@myai/sdk';
 import { getSdk, sdkState } from '@/sdk';
+import PasswordInput from '@/components/PasswordInput.vue';
 
 const keys = ref<UserApiKeyVo[]>([]);
 const providers = ref<ProviderVo[]>([]);
@@ -231,7 +232,10 @@ function onToggleEnabled(e: unknown) {
 
         <view class="form-item">
           <text class="label">API Key{{ editingId !== null ? '（留空保留原值）' : '' }}</text>
-          <input v-model="form.apiKey" class="input" type="password" :placeholder="editingId !== null ? '留空保留原值' : 'sk-...'" />
+          <PasswordInput
+            v-model="form.apiKey"
+            :placeholder="editingId !== null ? '留空保留原值' : 'sk-...'"
+          />
         </view>
 
         <view class="form-item">

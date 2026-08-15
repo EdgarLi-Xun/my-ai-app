@@ -63,6 +63,26 @@ async function onLogout() {
   destroySdk();
   uni.reLaunch({ url: '/pages/login/login' });
 }
+
+/** 记住凭据条数（ref 手动同步，因为 sdkStorage 非响应式）/ current remembered credentials count */
+const rememberedCount = ref(sdkStorage.getRememberedCredentials().length);
+
+/** 清除已记住的密码（ADR 0007 D6 ④） */
+async function onClearRemembered(): Promise<void> {
+  if (rememberedCount.value === 0) return;
+  const yes = await new Promise<boolean>((resolve) => {
+    uni.showModal({
+      title: '清除已记住的密码',
+      content: `确认清除全部 ${rememberedCount.value} 条已记住的登录账号？此操作不会登出当前账号。`,
+      success: (res) => resolve(res.confirm),
+      fail: () => resolve(false),
+    });
+  });
+  if (!yes) return;
+  sdkStorage.clearRememberedCredentials();
+  rememberedCount.value = sdkStorage.getRememberedCredentials().length;
+  uni.showToast({ title: '已清除', icon: 'success' });
+}
 </script>
 
 <template>
@@ -97,6 +117,21 @@ async function onLogout() {
     <view class="section">
       <text class="section-title">会话</text>
       <button class="btn-danger" @click="onLogout">登出</button>
+    </view>
+
+    <view class="section">
+      <text class="section-title">记住密码</text>
+      <view class="info-row">
+        <text class="info-label">已记住</text>
+        <text class="info-value">{{ rememberedCount }} 个账号</text>
+      </view>
+      <button
+        class="btn-warn"
+        :disabled="rememberedCount === 0"
+        @click="onClearRemembered"
+      >
+        清除已记住的密码
+      </button>
     </view>
   </view>
 </template>
@@ -190,5 +225,18 @@ async function onLogout() {
   color: #fff;
   border-radius: 8rpx;
   font-size: 30rpx;
+}
+.btn-warn {
+  width: 100%;
+  height: 80rpx;
+  line-height: 80rpx;
+  background: #f0a020;
+  color: #fff;
+  border-radius: 8rpx;
+  font-size: 30rpx;
+  margin-top: 16rpx;
+}
+.btn-warn:disabled {
+  background: #e0d0b0;
 }
 </style>

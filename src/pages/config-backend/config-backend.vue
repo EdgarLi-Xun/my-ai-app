@@ -59,7 +59,7 @@ function onSkip() {
           v-model="url"
           class="input"
           type="text"
-          placeholder="http://192.168.1.100:8031"
+          placeholder="http://192.168.2.103:8031"
           :disabled="checking"
         />
       </view>
