@@ -40,6 +40,32 @@
 | T22 | 自动命名完成后 system bar 同步（4s 重试兜底） | ✅ 已完成（2026-08-15） |
 | T23 | H5 DOM 直接驱动 system bar（绕开 setNavigationBarTitle 不生效） | ✅ 已完成（2026-08-16） |
 | T24 | 已删除区支持长按永久删除 | ✅ 已完成（2026-08-16） |
+| T25 | 发版本：图标 + 启动页 + H5 favicon（程序化占位） | ✅ 已完成（2026-08-16） |
+
+### T25 结果摘要（图标 / 启动页）
+
+- **背景**：发版本需要 iOS/Android/HarmonyOS/H5 全套图标 + 启动页；repo 无任何图片资源；环境无 PIL / ImageMagick；用户授权我自行设计占位。
+- **设计**（统一一套，避免平台割裂）：
+  - 紫渐变 `#667eea → #764ba2`（与 `index/index.vue` 已有 `.splash` 同色）
+  - iOS superellipse 近似圆角蒙版（22.5% radius）
+  - 主体：白色大写 "M"（代表 MyAi）
+  - 右上三颗白色小圆点"星"，暗示 AI
+- **改动**：
+  - 新增 `tools/generate-assets.mjs`：jimp 程序化生成。
+  - 产出文件：
+    - `src/static/app-plus/icon.png` 1024×1024（HBuilderX 编译时自动拆 iOS + Android 多尺寸）
+    - `src/static/app-plus/splash.png` 750×1334（iOS/Android 通用 splash）
+    - `src/static/app-harmony/icon.png` 1024×1024（HarmonyOS 入口）
+    - `src/static/app-harmony/splash.png` 750×1334
+    - `public/favicon.png` 32×32（H5）
+    - `public/apple-touch-icon.png` 180×180（H5 iOS 加书签）
+  - `index.html`：补 `<link rel="icon">` + `<link rel="apple-touch-icon">` 与 `<title>MyAi</title>`。
+- **不动**：`src/manifest.json` 的 `splashscreen` 配置（始终靠系统 + Vue `index/index.vue` 渐变页 + HBuilderX 在 App 端用 splash.png）。若要换 HBuilderX 自己的 native splash 控制，需在 GUI 端设置；本仓库不动。
+- **验证**：
+  - `npm run type-check` 通过。
+  - `npm run build:h5` DONE Build complete。
+  - 视觉未审（无 preview 工具）。建议你在 HBuilderX 自带的 icon preview 里看一眼再决定要不要换。
+- **替换占位**：未来你有正式 logo，把 `src/static/app-plus/icon.png` + `src/static/app-harmony/icon.png` + `public/apple-touch-icon.png` 三处一并替换即可，无需重跑脚本；删 `src/static/app-plus/splash.png` + `src/static/app-harmony/splash.png` 也会让 HBuilderX 退到默认。
 
 ### T24 结果摘要（已删除区永久删除手势）
 
