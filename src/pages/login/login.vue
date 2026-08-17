@@ -10,10 +10,15 @@
  */
 import { ref } from 'vue';
 import { onLoad } from '@dcloudio/uni-app';
-import { getSdk, setCurrentUser, hasToken, sdkStorage } from '@/sdk';
+import { getSdk, setCurrentUser, hasToken, sdkStorage, isSdkReady, bootSdk } from '@/sdk';
 import PasswordInput from '@/components/PasswordInput.vue';
 
 onLoad(() => {
+  // 登出（settings 页 destroySdk）后 bundle 为空，bootSdk 只在 onLaunch 冷启动跑过；
+  // 进登录页时如 SDK 未就绪则重新 boot（storage 里的 backendUrl 或 DEFAULT_BACKEND_URL）。
+  if (!isSdkReady()) {
+    bootSdk();
+  }
   // 进入页面时拉取已记住的账号列表（ADR 0007 D7/D8）
   refreshAccountList();
   if (hasToken()) {
@@ -63,8 +68,10 @@ function isFullEmail(s: string): boolean {
 async function onSubmit() {
   errorMsg.value = '';
   submitting.value = true;
+  console.log('[login] onSubmit start, tab=', tab.value);
   try {
     const { auth } = getSdk();
+    console.log('[login] got SDK, calling auth.' + tab.value);
     if (tab.value === 'login') {
       await auth.login({
         email: loginEmail.value.trim(),
@@ -77,6 +84,7 @@ async function onSubmit() {
         password: regPassword.value,
       });
     }
+    console.log('[login] auth call resolved');
     // 记住凭据（ADR 0007 D5/D6 ①）：
     //   勾选 → 保存；未勾选 → 按 email 移除（fail-quiet）
     const email = (tab.value === 'login' ? loginEmail.value : regEmail.value).trim();
@@ -98,6 +106,12 @@ async function onSubmit() {
     setCurrentUser(user);
     uni.reLaunch({ url: '/pages/conversations/conversations' });
   } catch (err: unknown) {
+    // 详细诊断日志：DevTools Sources 面板会停在 throw 那一行
+    // Detailed diagnostics: DevTools Sources panel pauses at the throw site
+    console.error('[login] CAUGHT:', err);
+    console.error('[login] err.constructor.name:', (err as { constructor?: { name?: string } })?.constructor?.name);
+    console.error('[login] err.stack:', (err as { stack?: string })?.stack);
+    console.error('[login] err.message:', (err as { message?: string })?.message);
     const e = err as { message?: string };
     errorMsg.value = e.message ?? '登录失败';
   } finally {

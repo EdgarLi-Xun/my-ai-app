@@ -27,9 +27,7 @@
                     "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>"
                 ]
             },
-            "ios" : {
-                "dSYMs" : false
-            },
+            "ios" : {},
             "sdkConfigs" : {},
             "icons" : {
                 "android" : {
@@ -70,7 +68,7 @@
     },
     "quickapp" : {},
     "mp-weixin" : {
-        "appid" : "",
+        "appid" : "wxdfee4e5830ea9b78",
         "setting" : {
             "urlCheck" : false
         },

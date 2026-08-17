@@ -1,36 +1,29 @@
 /**
- * uni-app x App 端 Web API 兼容垫片 / Web API polyfills for uni-app x App
+ * uni-app x 跨端 Web API 兼容垫片 / Web API polyfills for uni-app x multi-platform
  *
  * 背景 / Background:
  * `@myai/sdk` 假设几个 Web API 全局存在：fetch、AbortController、TextDecoder、ReadableStream。
- * 实测 uts 运行时（iOS / Android / HarmonyOS NEXT）均不注入这些，
- * H5 浏览器和 Node 20+ 才原生支持。
+ * 实测 uts 运行时（iOS / Android / HarmonyOS NEXT）和微信小程序运行时
+ * （JSC iOS / V8 Android）均不注入 fetch；H5 浏览器和 Node 20+ 才原生支持。
  *
- * 在 App 端按需安装：
- * - `fetch` shim → 落到 `uni.request`；只覆盖 SDK 用到的 Response 字段
- *   （`ok` / `status` / `statusText` / `json()` / `body.getReader()`）。
+ * 按需安装：
+ * - `fetch` shim → 落到 `uni.request`（App 端）或 `wx.request`（mp-weixin 端）。
+ *   只覆盖 SDK 用到的 Response 字段：`ok` / `status` / `statusText` / `json()`
+ *   / `body.getReader()`。
  *   - 非流式：body 用立即关闭的 reader 占位（SDK 不读 body）。
  *   - 流式端点（POST + 路径以 /messages 或 /regenerate 结尾）：
  *     dataType:'text' 拿整段 SSE 文本，body 用一次性 reader 把整段文本作为单 chunk
  *     喂给 SDK parser —— SDK 解析所有 SSE 帧、emit 所有 token/done 事件，
- *     AI 回复能正常进入消息列表。代价：App 端没有 typewriter 效果（一次性到位）。
- *     真 App 逐字流需换 XMLHttpRequest.onprogress 或 uni-app x 原生流式 API。
- * - `AbortController` shim → 最小实现，覆盖 SDK 实际访问的字段
- *   （`signal.aborted` / `signal.reason` / `signal.addEventListener('abort')` /
- *   `abort(reason?)`）。
- * - `TextDecoder` shim → 仅支持 utf-8，覆盖 SDK 流式分支的用法
- *   （`new TextDecoder('utf-8').decode(uint8, { stream: true })`）。
- *   跨 chunk 的不完整多字节序列在 `stream:true` 之间保留；`stream:false`
- *   时把残余字节替换为 U+FFFD（与原生非 fatal 模式一致）。
- * - `TextEncoder` shim → `fetch-polyfill` 的 `makeStreamingBody` 用
- *   `new TextEncoder().encode(text)` 把整段 SSE 文本编码成 Uint8Array 喂给
- *   SDK reader。App uts 运行时若没有原生 TextEncoder，原 try/catch 兜底成
- *   空数组，导致 SDK 解析不到任何 SSE 帧、流式无事件 → 消息不显示。
- *   shim 仅实现 `encode(string) → Uint8Array`（utf-8）、`encodeInto` 返回
- *   `{read:0, written:0}`（无增量需求）。
+ *     AI 回复能正常进入消息列表。代价：非 H5 端没有 typewriter 效果（一次性到位）。
+ *     真逐字流需换 XMLHttpRequest.onprogress 或 uni-app x 原生流式 API。
+ * - `AbortController` shim → 最小实现，覆盖 SDK 实际访问的字段。
+ * - `TextDecoder` shim → 仅支持 utf-8。
+ * - `TextEncoder` shim → `makeStreamingBody` 把 SSE body 编码成 Uint8Array 时用。
+ *   uts 运行时若没原生 TextEncoder，原 try/catch 兜底成空数组，
+ *   SDK 解析不到任何 SSE 帧、流式无事件 → 消息不显示。
  *
  * H5 / Node：原生 API 已存在 → 全部跳过安装。
- * App：缺哪个装哪个，互不影响。
+ * App / mp-weixin：缺哪个装哪个，互不影响。
  */
 
 interface UniRequestOptions {
@@ -184,25 +177,114 @@ function normalizeHeaders(h: RequestInit['headers']): Record<string, string> {
 }
 
 /**
- * 若 globalThis.fetch 不存在，且 uni.request 可用，则挂上一个 fetch 形状的实现。
- * If globalThis.fetch is missing and uni.request exists, install a fetch-shaped shim.
+ * 拿到当前运行时可用的"request 原语"（任一即可）：uni.request / wx.request。
+ * Pick whichever request primitive the current runtime exposes:
+ * uni.request (uni-app x App/H5/...) or wx.request (WeChat mini-program).
  *
- * 幂等：已安装过（标记在 globalThis 上）则跳过 / idempotent — re-entry no-op.
+ * uni-app x 编译到 mp-weixin 时，部分场景只挂 `wx.*`，没挂 `uni.*`，
+ * 这时回退到 `wx.request`，签名与 `uni.request` 基本一致（url/data/header/method/success/fail）。
+ */
+function pickRequestImpl(): ((opts: UniRequestOptions) => unknown) | null {
+  const g = globalThis as AppRuntimeGlobals & {
+    wx?: { request?: (opts: UniRequestOptions) => unknown };
+  };
+  if (typeof g.uni?.request === 'function') return g.uni.request.bind(g.uni);
+  if (typeof g.wx?.request === 'function') return g.wx.request.bind(g.wx);
+  return null;
+}
+
+/**
+ * 若 globalThis.fetch 不存在 / 在 mp-weixin 上是坏 stub，且任一 request 原语可用，
+ * 则挂上一个 fetch 形状的实现。
+ * If globalThis.fetch is missing OR is a broken stub on mp-weixin, and any
+ * request primitive exists, install a fetch-shaped shim.
+ *
+ * 幂等：已安装过则跳过 / idempotent.
  */
 export function ensureGlobalFetch(): void {
-  const g = globalThis as AppRuntimeGlobals;
+  const g = globalThis as AppRuntimeGlobals & {
+    wx?: { request?: (opts: UniRequestOptions) => unknown };
+  };
 
-  // H5 / Node：原生 fetch 已存在，跳过。
-  // H5 / Node: native fetch exists; skip.
-  if (typeof g.fetch === 'function') return;
+  // ★ 诊断：函数最顶部的 sentinel —— 用 setData + try/catch 双重确保可见
+  // Sentinel at the very top — try multiple log methods to confirm execution.
+  try {
+    // eslint-disable-next-line no-console
+    console.log('[myAiApp/fetch-polyfill] >>> ENTERED <<<');
+    // eslint-disable-next-line no-console
+    console.warn('[myAiApp/fetch-polyfill] >>> WARN-ENTERED <<<');
+    // eslint-disable-next-line no-console
+    console.error('[myAiApp/fetch-polyfill] >>> ERR-ENTERED <<<');
+  } catch (e) {
+    // 如果连 console.log 都抛，沉默吞掉
+    /* swallow */
+  }
 
-  // 非 uni-app x App 端（或 uts 注入失败）：无法兜底，跳过。
-  // Not uni-app x App (or uni injection failed): no fallback possible.
-  if (typeof g.uni?.request !== 'function') return;
+  const probeIsMpWeixin = typeof g.wx?.request === 'function';
+  const probeHadFetch = typeof g.fetch === 'function';
+  console.log(
+    `[myAiApp/fetch-polyfill] TOP (mp-weixin=${probeIsMpWeixin}, hadFetch=${probeHadFetch}, fetchTypeof=${typeof g.fetch})`,
+  );
 
-  const uniRequest = g.uni.request.bind(g.uni);
+  // 三端兜底：uni-app x App → uni.request；mp-weixin → wx.request；都没有则跳过。
+  // Three runtime fallbacks: uni.request (uni-app x App) → wx.request (mp-weixin) → bail.
+  const requestImpl = pickRequestImpl();
 
-  const fetchPolyfill: typeof fetch = function fetchPolyfill(
+  // 诊断：探针完整列表
+  console.log(
+    `[myAiApp/fetch-polyfill] PROBES (g.uni=${typeof g.uni}, g.uni.request=${typeof g.uni?.request}, g.wx=${typeof g.wx}, g.wx.request=${typeof g.wx?.request}, requestImpl=${requestImpl === null ? 'null' : 'fn'})`,
+  );
+
+  // H5 / Node：原生 fetch 已存在，跳过（且不是 mp-weixin）。
+  // H5 / Node (and not mp-weixin): native fetch exists; skip.
+  if (!probeIsMpWeixin && probeHadFetch) {
+    console.log('[myAiApp/fetch-polyfill] BAIL (H5/Node native fetch OK, no override needed)');
+    return;
+  }
+
+  if (requestImpl === null) {
+    // 强制装一个会清晰 throw 的 fetch，让错误立刻可见而不是 minified "f2"
+    // Install a fetch that throws clearly so the error is visible (instead of minified "f2")
+    if (typeof g.fetch !== 'function') {
+      g.fetch = () => {
+        throw new Error(
+          '[myAiApp/fetch-polyfill] no request impl found in runtime (uni.request and wx.request both missing) — install failed',
+        );
+      };
+      console.log('[myAiApp/fetch-polyfill] BAIL (no request impl, installed throwing stub)');
+    } else {
+      console.log('[myAiApp/fetch-polyfill] BAIL (no request impl, but g.fetch already a function — cannot override)');
+    }
+    return;
+  }
+
+  // 实际安装 shim —— 用 globalThis.fetch 兜底覆盖
+  // Install shim — override globalThis.fetch (whether or not it exists)
+  // 用 getter 替代普通函数：让 SDK 访问 `globalThis.fetch` 时每次都拿到我，且我能拦截
+  // Use a getter so we can intercept access to globalThis.fetch from anywhere (SDK's bare `fetch` lookup).
+  Object.defineProperty(g, 'fetch', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      console.log('[myAiApp/fetch-polyfill] FETCH GETTER ACCESSED — returning my fetch');
+      return fetchPolyfill;
+    },
+  });
+
+  // ★ 自检：装完立刻读回 fetch 状态，看有没有被什么东西覆盖
+  // Self-check: read back fetch immediately after install to see if anything overrode it
+  setTimeout(() => {
+    const t = typeof g.fetch;
+    const s = String(g.fetch).slice(0, 200);
+    console.log('[myAiApp/fetch-polyfill] SELF-CHECK after install: typeof g.fetch =', t, ', toString =', s);
+  }, 0);
+  setTimeout(() => {
+    const t = typeof g.fetch;
+    const s = String(g.fetch).slice(0, 200);
+    console.log('[myAiApp/fetch-polyfill] SELF-CHECK +5s: typeof g.fetch =', t, ', toString =', s);
+  }, 5000);
+
+  function fetchPolyfill(
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> {
@@ -215,18 +297,38 @@ export function ensureGlobalFetch(): void {
       data = typeof init.body === 'string' ? init.body : JSON.stringify(init.body);
     }
 
+    console.log('[myAiApp/fetch-polyfill] FETCH CALLED', method, url);
+
     return new Promise<Response>((resolve, reject) => {
       try {
-        // 流式端点：dataType:'text' 让 uni.request 把 SSE body 当字符串返回（不尝试 JSON parse）
-        // Streaming endpoints: 'text' so uni.request returns raw SSE body (no JSON parse).
         const streaming = isStreamingRequest(method, url);
-        uniRequest({
+        console.log(
+          `[myAiApp/fetch-polyfill] BEFORE wx.request call: streaming=${streaming}, requestImpl=${typeof requestImpl}`,
+        );
+        // 保险：再包一层 try 捕获同步 throw + 用 setTimeout 把 fail callback 包到下一 tick
+        let called = false;
+        if (requestImpl === null) {
+          reject(new Error('[myAiApp/fetch-polyfill] request impl became null mid-call'));
+          return;
+        }
+        requestImpl({
           url,
           method,
           data,
           header,
           ...(streaming ? { dataType: 'text' as const } : {}),
           success: (res) => {
+            if (called) {
+              console.warn('[myAiApp/fetch-polyfill] success called twice');
+              return;
+            }
+            called = true;
+            console.log(
+              '[myAiApp/fetch-polyfill] wx.request success, statusCode=',
+              (res as { statusCode?: number })?.statusCode,
+              'dataType=',
+              typeof res?.data,
+            );
             const status = res.statusCode ?? 0;
             resolve(
               toResponseShim({
@@ -244,8 +346,6 @@ export function ensureGlobalFetch(): void {
                   }
                   return d;
                 },
-                // 流式 → 把整段 SSE body 一次性塞给 reader；非流式 → 仍用立即关闭的 stub。
-                // Streaming → feed full SSE body as one chunk; non-streaming → closed stub.
                 body: streaming
                   ? makeStreamingBody(typeof res.data === 'string' ? res.data : (res.data == null ? '' : String(res.data)))
                   : makeClosedReaderStub(),
@@ -253,18 +353,23 @@ export function ensureGlobalFetch(): void {
             );
           },
           fail: (err) => {
-            reject(new Error(err?.errMsg ?? 'uni.request failed'));
+            if (called) {
+              console.warn('[myAiApp/fetch-polyfill] fail called twice');
+              return;
+            }
+            called = true;
+            console.log('[myAiApp/fetch-polyfill] wx.request fail:', err);
+            reject(new Error(err?.errMsg ?? 'request failed'));
           },
         });
+        console.log('[myAiApp/fetch-polyfill] AFTER wx.request call (returned synchronously)');
       } catch (err) {
-        // uni.request 同步抛错（极少见，如参数非法）
-        // Defensive: uni.request can throw synchronously in rare cases.
+        console.error('[myAiApp/fetch-polyfill] SYNC THROW in wx.request call:', err);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
   };
-
-  g.fetch = fetchPolyfill;
+  console.log('[myAiApp/fetch-polyfill] INSTALLED (overrode globalThis.fetch)');
 }
 
 // ============================================================

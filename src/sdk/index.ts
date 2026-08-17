@@ -19,6 +19,9 @@ import {
   UniStorageAdapter,
   UserApiKeyApi,
   createStorage,
+  streamConversationMessage as sdkStreamConversationMessage,
+  streamRegenerate as sdkStreamRegenerate,
+  validateBackendUrl as sdkValidateBackendUrl,
   type AuthProvider,
   type SdkStorage,
   type StorageAdapter,
@@ -42,6 +45,52 @@ ensureGlobalTextDecoder();
 ensureGlobalTextEncoder();
 
 // ============================================================
+// fetchImpl 注入（绕过 mp-weixin bare `fetch` 解析问题）
+// fetchImpl injection (workaround for mp-weixin's bare `fetch` resolution)
+// ============================================================
+
+/**
+ * mp-weixin 运行时，bundle 内裸标识符 `fetch` 不解析到 `globalThis.fetch`（实测
+ * `globalThis.fetch` getter 在 SDK 调 fetch 时不会被触发，SDK 内部 `r = this.opts.fetchImpl
+ * ?? fetch` 得到 `undefined` → `await r(s,o)` 抛 `f2 is not a function`）。
+ *
+ * SDK 已经提供 `fetchImpl` 选项走显式注入路径。我们把所有 SDK HTTP 入口
+ * （FetchHttpClient 构造 + streamConversationMessage + streamRegenerate
+ * + validateBackendUrl）都包装一层，自动注入 `globalThis.fetch`，让 SDK 永远
+ * 走 `fetchImpl` 路径。
+ *
+ * On mp-weixin the bare identifier `fetch` in the bundled SDK does not resolve to
+ * `globalThis.fetch`. The SDK has a `fetchImpl` option that bypasses this — we wrap
+ * every SDK HTTP entry point to inject it automatically.
+ *
+ * @param fn      被包装的 SDK 函数 / SDK function to wrap
+ * @param minArgs 声明参数个数；调用方省略尾部 options 对象时据此补一个 `{ fetchImpl }`。
+ *                0 表示 options 必传（如 stream 两个函数）。
+ *                Declared arity; used to append `{ fetchImpl }` when the caller omits
+ *                the trailing options object. 0 = options is required (stream functions).
+ */
+function injectFetchImpl<T extends (...args: never[]) => unknown>(fn: T, minArgs = 0): T {
+  const wrapped = (...args: unknown[]) => {
+    const last = args[args.length - 1];
+    if (last !== null && typeof last === 'object') {
+      if (!('fetchImpl' in (last as Record<string, unknown>))) {
+        (last as Record<string, unknown>).fetchImpl = globalThis.fetch;
+      }
+    } else if (args.length < minArgs) {
+      args.push({ fetchImpl: globalThis.fetch });
+    }
+    return fn(...(args as Parameters<T>));
+  };
+  return wrapped as unknown as T;
+}
+
+const streamConversationMessage = injectFetchImpl(sdkStreamConversationMessage);
+const streamRegenerate = injectFetchImpl(sdkStreamRegenerate);
+// validateBackendUrl(url, options?)：options 可省略 → minArgs = 2
+// validateBackendUrl(url, options?): options optional → minArgs = 2
+const validateBackendUrl = injectFetchImpl(sdkValidateBackendUrl, 2);
+
+// ============================================================
 // 默认后端 URL / Default backend URL
 // ============================================================
 
@@ -52,15 +101,24 @@ ensureGlobalTextEncoder();
  * 调整方法：直接改这个常量并重新构建。
  * To change: edit this constant and rebuild.
  */
-export const DEFAULT_BACKEND_URL = 'http://192.168.2.103:8031';
+export const DEFAULT_BACKEND_URL = 'http://192.168.2.144:8031';
 
 // ============================================================
 // 存储选择 / Storage selection
 // ============================================================
 
-/** 选平台存储：App 优先 UniStorageAdapter，H5 用 LocalStorageAdapter / platform-agnostic storage */
+/**
+ * 选平台存储：App / mp-weixin 优先 UniStorageAdapter，H5 用 LocalStorageAdapter。
+ * Platform-agnostic storage selection.
+ *
+ * mp-weixin 运行时没有 `uni` 全局（uni-app x 把 uni.* 编译为模块内引用），
+ * 只有 `wx`；UniStorageAdapter 内部会回退 wx.*StorageSync，所以这里 uni / wx
+ * 任一存在即选 UniStorageAdapter。此前只判 uni → 小程序落到 LocalStorageAdapter
+ * → 沙箱无 localStorage → token 等静默丢失 → 登录后 /api/auth/me 匿名 → 5000。
+ */
 function pickAdapter(): StorageAdapter {
-  if (typeof (globalThis as { uni?: unknown }).uni !== 'undefined') {
+  const g = globalThis as { uni?: unknown; wx?: unknown };
+  if (typeof g.uni !== 'undefined' || typeof g.wx !== 'undefined') {
     return new UniStorageAdapter();
   }
   return new LocalStorageAdapter();
@@ -154,6 +212,9 @@ export function rebuildSdk(backendUrl: string): void {
         handleUnauthorized();
       }
     },
+    // ★ 显式注入 fetchImpl —— 绕过 mp-weixin runtime 下 bare `fetch` 不解析到 globalThis.fetch 的问题。
+    // Explicitly inject fetchImpl to bypass the mp-weixin bare `fetch` resolution issue.
+    fetchImpl: globalThis.fetch,
   });
   const auth = new AuthService({ http, storage });
   bundle = {
@@ -175,6 +236,7 @@ export function rebuildSdk(backendUrl: string): void {
  */
 export function destroySdk(): void {
   bundle = null;
+  state.initialized = false; // 复位，否则 bootSdk() 会因 initialized=true 永远早退，登出后无法再登录
   state.backendUrl = null;
   state.currentUser = null;
   storage.clearBackendUrl();
@@ -236,10 +298,11 @@ export const sdkState = state;
 export { storage as sdkStorage };
 
 // 常用 SDK 工具的 re-export / re-export common SDK utilities for pages
-export {
-  streamConversationMessage,
-  streamRegenerate,
-  validateBackendUrl,
-  type StreamingEvent,
-  type StreamRequestOptions,
-} from '@myai/sdk';
+// 注意：streamConversationMessage / streamRegenerate / validateBackendUrl 是本地包装版本
+// （自动注入 fetchImpl），不要从 '@myai/sdk' 直接 re-export 这三个名字。
+// Note: streamConversationMessage / streamRegenerate / validateBackendUrl are locally wrapped
+// (auto-inject fetchImpl); do not re-export these names directly from '@myai/sdk'.
+export { type StreamingEvent, type StreamRequestOptions } from '@myai/sdk';
+// 本地包装版（自动注入 fetchImpl）覆盖 @myai/sdk 原版
+// Locally-wrapped versions (auto-inject fetchImpl) shadow the originals
+export { streamConversationMessage, streamRegenerate, validateBackendUrl };

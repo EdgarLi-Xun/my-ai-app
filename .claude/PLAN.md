@@ -15,6 +15,9 @@
 - `2026-08-15` — conversation-detail 改为左右分栏布局：原本 `.message` 是 `inline-block` + `margin-left: auto`，但 `margin-left: auto` 只在父级是 flex/grid 时才推得动，App 端没真正右对齐。改造为 `.message` 是 flex row（`.msg-user → justify-content:flex-end`，`.msg-assistant → flex-start`），里面新增一层 `.bubble` 承载 max-width / 背景 / 边框；template 把两条 `<text>` 包进 `<view class="bubble">`；`@longpress` 从 `.message` 移到 `.bubble`（避免空白处误触）。`vue-tsc --noEmit` 通过。
 - `2026-08-15` — 记住密码 + 密码框小眼睛：经 10 轮 grilling 形成 ADR 0007（`docs/ADR-0007-remember-password-and-password-input.md`，与 `.claude/` 内 PLAN/REQUIREMENTS 分离，单独放 `docs/`）。决定：多账号本地明文缓存（上限 3 + LRU 按登录成功时间），login/register 双 tab 加 `记住密码` 勾选框默认勾选，列表项点击 + 邮箱框失焦匹配预填，长按删除单项，4010/logout/反勾选登录成功 三重清凭据；新建 `<PasswordInput>` 公共组件，`uni-icons` 的 `eye-slash` / `eye` 切换，三处复用（login 密码 / register 密码 / keys 页 API Key）。代码改动未启动，本轮仅文档落地。
 - `2026-08-15` — 升级 `@dcloudio/*` 8 个包从 `3.0.0-5020420260813001` → `3.0.0-5020420260813002`（vue3 通道 patch 升级），`npm install` 同步 lockfile，`type-check` 通过、`build:h5` 产物正常。**预期目的未达成**：Sass `legacy-js-api` deprecation 警告来自 Vite 5.2.8 ↔ sass 1.102.0 的已知上游问题，与 uni-app 包版本无关，等 Dart Sass 2.0 或 Vite 上游迁 modern API。按用户选择 A（接受警告），不回滚升级、不改 vite.config。
+- `2026-08-17` — 修复登出后再登录报 `SdkNotBootedError`（T27）。根因：`settings.vue` 登出调 `destroySdk()` 置空 bundle，但没复位 `state.initialized`（`bootSdk()` 因此永远早退），且 `bootSdk()` 只在 `onLaunch` 冷启动执行 → 同一运行上下文内再进登录页 `getSdk()` 抛错（各端通用，此前未走过登出→再登录路径）。修复：`destroySdk()` 复位 `state.initialized = false`；`login.vue` onLoad 时 `if (!isSdkReady()) bootSdk()` 兜底重建。`vue-tsc --noEmit` 通过、`build:mp-weixin` 产物已验证。注：登出后 backendUrl 被清（既有设计），再登录走 `DEFAULT_BACKEND_URL` 兜底。
+- `2026-08-17` — 修复微信小程序切换后端地址报「校验失败：URL格式无效」（T28）。根因：mp-weixin 沙箱没有全局 `URL` 构造器，SDK `validateBackendUrl` 里 `new URL()` 直接抛错 → 所有地址被误判格式无效；且 vendored bundle 内裸 `fetch` / `AbortController` 不解析到 globalThis 属性。修复：① SDK（my-ai-sdk T10）改用轻量正则解析器 `parseBackendUrl()`（scheme://authority → origin，兼容 IPv6 字面量与端口校验，拒绝 userinfo），fetch / AbortController 一律经 `globalThis` 显式读取（fetch 缺失返回明确错误；AbortController 缺失时 Promise.race 兜底超时），新增 3 条单测，vitest 111/111；② App `src/sdk/index.ts` 把 `validateBackendUrl` 纳入 `injectFetchImpl` 包装（扩展 `minArgs` 参数：调用方省略 options 对象时自动补 `{ fetchImpl: globalThis.fetch }`），不再从 `@myai/sdk` 直接 re-export。`vue-tsc --noEmit` 通过、`build:mp-weixin` 产物确认包装（minArgs=2）与新版校验器均已编入且无 `new URL(` 调用。**待用户在微信开发者工具重新编译后复验 设置→修改后端地址。**
+- `2026-08-17` — 修复微信小程序登录报「服务异常」（T26）。根因：mp-weixin 运行时没有 `uni` 全局（编译产物中 `uni.*` 变成 `vendor.index.*` 模块内引用），`pickAdapter()` 落到 `LocalStorageAdapter`，小程序沙箱无 `localStorage` → `setToken`/`getToken` 静默失效 → 登录成功后 `GET /api/auth/me` 不带 Authorization → 后端匿名请求在 `AuthServiceImpl.getCurrentUser` 抛 `ClassCastException` → 兜底 5000「服务异常」。修复：SDK `UniStorageAdapter` 构造回退 `globalThis.uni ?? globalThis.wx`（wx.*StorageSync 同名同签名，新增 2 条单测）；App `pickAdapter()` 改为 uni / wx 任一存在即选 `UniStorageAdapter`。SDK 108/108 测试通过、双端 typecheck 通过、`build:mp-weixin` 产物已验证含回退逻辑。**待用户在微信开发者工具中实机复验登录。**
 
 ---
 
@@ -41,6 +44,19 @@
 | T23 | H5 DOM 直接驱动 system bar（绕开 setNavigationBarTitle 不生效） | ✅ 已完成（2026-08-16） |
 | T24 | 已删除区支持长按永久删除 | ✅ 已完成（2026-08-16） |
 | T25 | 发版本：图标 + 启动页 + H5 favicon（程序化占位） | ✅ 已完成（2026-08-16） |
+| T26 | 修复微信小程序登录「服务异常」（token 存储静默失效） | ✅ 已完成（2026-08-17，待用户在开发者工具复验） |
+| T27 | 修复登出后再登录 `SdkNotBootedError`（destroySdk 不复位 initialized） | ✅ 已完成（2026-08-17，待用户复验） |
+| T28 | 修复小程序切换后端地址「URL格式无效」（SDK 去 `URL` 依赖 + App `validateBackendUrl` 注入 fetchImpl） | ✅ 已完成（2026-08-17，待用户在开发者工具复验） |
+
+### T26 结果摘要（mp-weixin 登录存储修复）
+
+- **现象**：小程序点登录报「服务异常」；`POST /api/auth/login` 成功，随后 `GET /api/auth/me` 5000。App / H5 正常。
+- **根因**：mp-weixin 运行时无 `uni` 全局（编译产物里 `uni.reLaunch` → `vendor.index.reLaunch`），`pickAdapter()` 判 `globalThis.uni` 为 undefined → 选 `LocalStorageAdapter` → 小程序沙箱无 `localStorage` → token/backendUrl/记住凭据全部静默丢写。无 token 的 `/me` 被后端当匿名，`AuthServiceImpl.getCurrentUser` 强转 `AuthPrincipal` 抛 `ClassCastException` → `GlobalExceptionHandler` 兜底 5000「服务异常」。
+- **修复**：
+  1. `@myai/sdk` `src/storage/index.ts`：`UniStorageAdapter` 构造 `globalThis.uni ?? globalThis.wx`（`wx.*StorageSync` 同名同签名）；`index.test.ts` 增 2 用例（wx 回退 roundtrip、uni 优先于 wx），108/108 通过，`npm run build` 出 dist。
+  2. `src/sdk/index.ts` `pickAdapter()`：`uni` / `wx` 任一存在即选 `UniStorageAdapter`。
+- **验证**：SDK typecheck + vitest 108/108；App `vue-tsc --noEmit` 通过；`build:mp-weixin` 产物确认 `this.uni=e.uni??e.wx` 与新 pickAdapter 条件均已编入。
+- **遗留**：后端 `/api/auth/me` 对匿名请求应返回 4010 而非 5000（`my-ai` 仓库另行处理）；`fetch-polyfill.ts` / `login.vue` 的诊断日志保留，复验后可清理。
 
 ### T25 结果摘要（图标 / 启动页）
 

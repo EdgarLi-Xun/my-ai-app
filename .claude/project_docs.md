@@ -54,9 +54,8 @@ myAi-app/
 
 ## 4. SDK 集成（`src/sdk/index.ts`）
 
-- 平台存储探测 `globalThis.uni`：
-  - App 端 → `UniStorageAdapter`（`uni.setStorageSync` 等同步 API）。
-  - H5 端 → `LocalStorageAdapter`（`window.localStorage`）。
+- 平台存储探测（`pickAdapter`）：`globalThis.uni` 或 `globalThis.wx` 任一存在 → `UniStorageAdapter`；否则 → `LocalStorageAdapter`（`window.localStorage`）。
+  - App 端走 `uni.*StorageSync` 同步 API；mp-weixin 运行时没有 `uni` 全局（uni-app x 把 `uni.*` 编译为模块内引用），`UniStorageAdapter` 内部回退 `wx.*StorageSync`（同名同签名）。
 - `FetchHttpClient` 4010 回调同时调 `AuthService.notifyUnauthorized`（SDK 内部清 token + activeConversationId）与本仓库的 `handleUnauthorized`（清 `sdkState.currentUser` + `sdkStorage.clearToken / clearActiveConversationId`）。
 - 4010 后由具体页面在 `catch` 或主动 `hasToken()` 检查时跳登录页（`uni.reLaunch({ url: '/pages/login/login' })`）。
 - 切换后端 URL（settings 页）：`validateBackendUrl` → `rebuildSdk`。

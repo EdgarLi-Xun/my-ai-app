@@ -60,7 +60,7 @@
 | 框架 | uni-app x + Vue 3 + Vite + TS（`@dcloudio/uni-app: 3.0.0-5020420260813001`） | PLAN §24 |
 | SDK | 本地 `file:../myAi-sdk` | PLAN §25 |
 | UI | uni-ui + easycom 自动注册 | PLAN §26 |
-| 存储 | App → `UniStorageAdapter`，H5 → `LocalStorageAdapter`（SDK 内部按 `globalThis.uni` 选） | PLAN §27 |
+| 存储 | App / mp-weixin → `UniStorageAdapter`（mp-weixin 无 `uni` 全局时 SDK 内部回退 `wx.*StorageSync`），H5 → `LocalStorageAdapter` | PLAN §27 / T26 |
 | 后端 URL | 可配置；首启弹 `config-backend`；键 `myai.backendUrl` | PLAN §28 |
 | 4010 处理 | `FetchHttpClient.onUnauthorized → AuthService.notifyUnauthorized → 清 token + activeConversationId + currentUser` | PLAN §29 |
 | 包名 | `cn.edgarli.myai`（鸿蒙 mp-harmony 段已配） | PLAN §30 |
@@ -106,3 +106,5 @@
 
 - `2026-08-14` — 首版生成：覆盖项目骨架（`src/` 7 页面 + SDK 启动器）+ 决策记录 + Phase 2 范围；与 `.claude/PLAN.md §修改日志` 对齐。
 - `2026-08-15` — 新增功能需求 1.10（多账号记住密码）与 1.11（`<PasswordInput>` 组件三处复用）；新增 §3 显式不做（密码加密 / Keychain / 多账号上限配置 / 临时账号自动遗忘）；§4 关键决策补 6 条；§5 已知缺口补 16-19。设计全部在 `docs/ADR-0007-remember-password-and-password-input.md`，本轮仅文档落地，代码未启动。
+- `2026-08-17` — §2 存储行更新：mp-weixin 运行时无 `uni` 全局，`UniStorageAdapter` 回退 `wx.*StorageSync`（SDK T9 + App T26）；同日 T27 修复登出后再登录 `SdkNotBootedError`（`destroySdk` 复位 `initialized` + 登录页兜底 `bootSdk`）。
+- `2026-08-17` — T28：修复小程序切换后端地址「URL格式无效」。SDK T10 重写 `validateBackendUrl`（正则解析器 `parseBackendUrl` 替代全局 `URL`；fetch / AbortController 经 `globalThis` 显式读取；race 超时兜底），App 侧将其纳入 `injectFetchImpl` 包装自动注入 `fetchImpl`。

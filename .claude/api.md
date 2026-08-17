@@ -91,16 +91,16 @@
 
 ## 5. App 层 SDK 启动器（来源：`src/sdk/index.ts`）
 
-- 模块单例：`adapter`（`UniStorageAdapter` 或 `LocalStorageAdapter`，按 `globalThis.uni` 自动选）→ `storage = createStorage(adapter)` → 与 SDK 实例生命周期解耦。
+- 模块单例：`adapter`（`UniStorageAdapter` 或 `LocalStorageAdapter`，按 `globalThis.uni` / `globalThis.wx` 自动选；mp-weixin 无 `uni` 全局，`UniStorageAdapter` 内部回退 `wx.*StorageSync`）→ `storage = createStorage(adapter)` → 与 SDK 实例生命周期解耦。
 - `bootSdk()` — 应用启动时调用；如 `storage.getBackendUrl()` 已存在则 `rebuildSdk(url)`；幂等。
 - `rebuildSdk(backendUrl)` — 新建 `FetchHttpClient` + `AuthService` + 5 个 endpoint 实例；4010 回调先尝试 `bundle.auth.notifyUnauthorized()`，回退到本地 `handleUnauthorized()`；同时把 URL 写入 storage。
-- `destroySdk()` — 清空 `bundle` / `state` / `storage`（除 adapter 本身）；保留 storage 以便下次配置。
+- `destroySdk()` — 清空 `bundle` / `state`（含复位 `initialized`，2026-08-17 修复，否则 `bootSdk()` 早退无法再启动）/ `storage`（除 adapter 本身）；保留 storage 实例以便下次配置。
 - `getSdk()` — 取出当前 bundle；未启动抛 `SdkNotBootedError`。
 - `isSdkReady()` — bundle 与 `backendUrl` 都已就绪。
 - `setCurrentUser(user)` / `hasToken()` — 页面在 `auth.getCurrentUser()` 后写入 `sdkState.currentUser`；UI 用 `hasToken()` 决定是否跳登录。
 - `sdkState`（reactive）— `initialized / backendUrl / currentUser`。
 - `sdkStorage` — `storage` 别名；页面可读 `getToken / getActiveConversationId / getBackendUrl` 等。
-- Re-export（页面直接 `import`）：`streamConversationMessage`、`streamRegenerate`、`validateBackendUrl` 及对应类型。
+- Re-export（页面直接 `import`）：`streamConversationMessage`、`streamRegenerate`、`validateBackendUrl` 及对应类型。三者均为本地 `injectFetchImpl` 包装版（自动注入 `globalThis.fetch`，绕过 mp-weixin vendor bundle 内裸 `fetch` 不解析问题；`validateBackendUrl` 的 options 可省略，包装层按 `minArgs` 自动补 `{ fetchImpl }`），不从 `@myai/sdk` 直接 re-export。
 
 ## 6. SDK 调用契约（页面侧）
 
